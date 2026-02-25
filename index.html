@@ -1,0 +1,359 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>我的雲端單字本</title>
+  <style>
+    :root { font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans TC", sans-serif; }
+    body { margin: 0; background:#f6f7fb; color:#111; }
+    .wrap { max-width: 980px; margin: 0 auto; padding: 18px; }
+    .card { background:#fff; border-radius: 16px; box-shadow: 0 8px 24px rgba(0,0,0,.06); padding: 16px; margin-bottom: 14px; }
+    h1 { font-size: 20px; margin: 0 0 10px; }
+    .row { display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
+    input, button, textarea, select {
+      border-radius: 12px; border: 1px solid #d9dce6; padding: 10px 12px; font-size: 14px; background:#fff;
+    }
+    input, textarea { flex: 1; min-width: 240px; }
+    textarea { min-height: 84px; resize: vertical; }
+    button { cursor: pointer; border: 0; background:#111; color:#fff; }
+    button.secondary { background:#eef0f6; color:#111; border: 1px solid #d9dce6; }
+    button.danger { background:#c62828; }
+    .muted { color:#666; font-size: 12px; }
+    .pill { display:inline-block; padding: 4px 10px; border-radius: 999px; background:#eef0f6; font-size: 12px; margin-right:6px; }
+    .list { display:grid; grid-template-columns: 1fr; gap: 10px; }
+    .item { border:1px solid #e7e9f2; border-radius: 14px; padding: 12px; }
+    .itemTop { display:flex; justify-content:space-between; gap:10px; flex-wrap:wrap; align-items: baseline; }
+    .word { font-size: 18px; font-weight: 700; }
+    .meta { font-size: 12px; color:#555; }
+    .kv { margin-top:8px; font-size: 14px; line-height: 1.5; }
+    .kv b { display:inline-block; min-width: 92px; }
+    .actions { display:flex; gap:8px; flex-wrap:wrap; margin-top: 10px; }
+    .grid2 { display:grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    @media (max-width: 720px){ .grid2 { grid-template-columns: 1fr; } }
+    .notice { background:#fff7e6; border:1px solid #ffe2a8; padding:10px 12px; border-radius:12px; font-size: 13px; margin-top:10px; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="card">
+      <h1>我的雲端單字本</h1>
+
+      <div class="row">
+        <button id="loginBtn">Google 登入</button>
+        <button id="logoutBtn" class="secondary" style="display:none;">登出</button>
+        <span class="muted" id="userInfo">尚未登入</span>
+      </div>
+
+      <div class="notice">
+        這是「基礎可用版」：先把登入與雲端同步跑通。之後你想要自動抓中文/詞性/例句，我再幫你加上去。
+      </div>
+    </div>
+
+    <div class="card" id="main" style="display:none;">
+      <div class="row">
+        <input id="wordInput" placeholder="輸入英文單字，例如: accountable" autocomplete="off" />
+        <button id="addBtn">加入 / +1 次</button>
+      </div>
+
+      <div class="row" style="margin-top:10px;">
+        <input id="searchInput" placeholder="搜尋單字或中文…" />
+        <select id="sortSelect">
+          <option value="lastSeen_desc">排序：最近查過</option>
+          <option value="count_desc">排序：查詢次數</option>
+          <option value="created_desc">排序：新增時間</option>
+          <option value="alpha_asc">排序：A → Z</option>
+        </select>
+      </div>
+
+      <div class="muted" style="margin-top:8px;" id="stats"></div>
+      <div class="list" id="list" style="margin-top:12px;"></div>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script>
+    // ====== 只要改這兩行（到 Supabase：Project Settings → API）======
+    const SUPABASE_URL = "PASTE_YOUR_SUPABASE_URL"; // 例如 https://abcd1234.supabase.co
+    const SUPABASE_ANON_KEY = "PASTE_YOUR_SUPABASE_ANON_KEY";
+    // ==================================================================
+    const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+    const els = {
+      loginBtn: document.getElementById("loginBtn"),
+      logoutBtn: document.getElementById("logoutBtn"),
+      userInfo: document.getElementById("userInfo"),
+      main: document.getElementById("main"),
+      wordInput: document.getElementById("wordInput"),
+      addBtn: document.getElementById("addBtn"),
+      searchInput: document.getElementById("searchInput"),
+      sortSelect: document.getElementById("sortSelect"),
+      list: document.getElementById("list"),
+      stats: document.getElementById("stats"),
+    };
+
+    let user = null;
+    let itemsCache = [];
+
+    function normWord(w){ return (w || "").trim().toLowerCase(); }
+    function fmt(d){
+      if(!d) return "";
+      const dt = new Date(d);
+      if(isNaN(dt.getTime())) return "";
+      return dt.toLocaleString("zh-TW", { hour12:false });
+    }
+    function uniq(arr){ return [...new Set((arr||[]).filter(Boolean))]; }
+    function escapeHTML(str){
+      return (str ?? "").toString()
+        .replaceAll("&","&amp;")
+        .replaceAll("<","&lt;")
+        .replaceAll(">","&gt;")
+        .replaceAll('"',"&quot;")
+        .replaceAll("'","&#039;");
+    }
+
+    async function refreshAuth(){
+      const { data } = await supabase.auth.getUser();
+      user = data?.user || null;
+
+      if(!user){
+        els.userInfo.textContent = "尚未登入";
+        els.main.style.display = "none";
+        els.logoutBtn.style.display = "none";
+        els.loginBtn.style.display = "";
+        return;
+      }
+
+      els.userInfo.textContent = `已登入：${user.email || user.id}`;
+      els.main.style.display = "";
+      els.logoutBtn.style.display = "";
+      els.loginBtn.style.display = "none";
+      await loadList();
+    }
+
+    async function loadList(){
+      if(!user) return;
+
+      const { data, error } = await supabase
+        .from("vocab")
+        .select("*")
+        .order("last_seen", { ascending: false })
+        .limit(5000);
+
+      if(error){
+        alert("讀取失敗：" + error.message);
+        return;
+      }
+
+      itemsCache = data || [];
+      render();
+    }
+
+    function getFilteredSorted(){
+      const q = (els.searchInput.value || "").trim().toLowerCase();
+      let arr = itemsCache;
+
+      if(q){
+        arr = arr.filter(it =>
+          (it.word || "").includes(q) ||
+          (it.zh || "").toLowerCase().includes(q) ||
+          (it.pos || "").toLowerCase().includes(q)
+        );
+      }
+
+      const sort = els.sortSelect.value;
+      const cmp = {
+        lastSeen_desc: (a,b) => new Date(b.last_seen) - new Date(a.last_seen),
+        count_desc: (a,b) => (b.count||0) - (a.count||0),
+        created_desc: (a,b) => new Date(b.created_at) - new Date(a.created_at),
+        alpha_asc: (a,b) => (a.word||"").localeCompare(b.word||""),
+      }[sort] || (()=>0);
+
+      return [...arr].sort(cmp);
+    }
+
+    function render(){
+      const total = itemsCache.length;
+      const totalLookups = itemsCache.reduce((s,it)=> s + (it.count||0), 0);
+      els.stats.textContent = `共 ${total} 個單字｜累計查詢 ${totalLookups} 次`;
+
+      const arr = getFilteredSorted();
+      els.list.innerHTML = "";
+
+      if(arr.length === 0){
+        els.list.innerHTML = `<div class="muted">沒有資料（或搜尋不到）。</div>`;
+        return;
+      }
+
+      for(const it of arr){
+        const div = document.createElement("div");
+        div.className = "item";
+        const preps = (it.prepositions || []).map(p => `<span class="pill">${escapeHTML(p)}</span>`).join("");
+
+        div.innerHTML = `
+          <div class="itemTop">
+            <div>
+              <span class="word">${escapeHTML(it.word)}</span>
+              ${it.pos ? `<span class="pill">${escapeHTML(it.pos)}</span>` : ""}
+            </div>
+            <div class="meta">
+              次數：<b>${it.count || 0}</b> ｜新增：${fmt(it.created_at)} ｜最後：${fmt(it.last_seen)}
+            </div>
+          </div>
+
+          <div class="kv"><b>中文解釋</b> ${escapeHTML(it.zh || "")}</div>
+          <div class="kv"><b>例句</b> ${escapeHTML(it.example || "")}</div>
+          <div class="kv"><b>介係詞</b> ${preps || `<span class="muted">（可編輯補上）</span>`}</div>
+
+          <div class="actions">
+            <button class="secondary" data-act="edit">編輯</button>
+            <button class="secondary" data-act="plus">再查一次（+1）</button>
+            <button class="danger" data-act="del">刪除</button>
+          </div>
+
+          <div data-edit style="display:none; margin-top:10px;">
+            <div class="grid2">
+              <div>
+                <div class="muted">中文解釋</div>
+                <textarea data-in="zh">${escapeHTML(it.zh||"")}</textarea>
+              </div>
+              <div>
+                <div class="muted">詞性（noun / verb / adj...）</div>
+                <input data-in="pos" value="${escapeHTML(it.pos||"")}" />
+                <div class="muted" style="margin-top:8px;">介係詞（逗號分隔）</div>
+                <input data-in="preps" value="${escapeHTML((it.prepositions||[]).join(", "))}" />
+              </div>
+            </div>
+            <div class="muted" style="margin-top:8px;">例句</div>
+            <textarea data-in="example">${escapeHTML(it.example||"")}</textarea>
+            <div class="actions">
+              <button data-act="save">儲存</button>
+              <button class="secondary" data-act="cancel">取消</button>
+            </div>
+          </div>
+        `;
+
+        div.addEventListener("click", async (e) => {
+          const btn = e.target.closest("button");
+          if(!btn) return;
+          const act = btn.dataset.act;
+
+          if(act === "edit"){
+            div.querySelector('[data-edit]').style.display = "";
+            return;
+          }
+          if(act === "cancel"){
+            div.querySelector('[data-edit]').style.display = "none";
+            return;
+          }
+          if(act === "save"){
+            const zh = div.querySelector('[data-in="zh"]').value.trim();
+            const pos = div.querySelector('[data-in="pos"]').value.trim();
+            const example = div.querySelector('[data-in="example"]').value.trim();
+            const prepsStr = div.querySelector('[data-in="preps"]').value.trim();
+            const prepositions = uniq(prepsStr.split(",").map(s=>s.trim()).filter(Boolean));
+            const now = new Date().toISOString();
+
+            const { error } = await supabase
+              .from("vocab")
+              .update({ zh, pos, example, prepositions, updated_at: now })
+              .eq("id", it.id);
+
+            if(error) return alert("儲存失敗：" + error.message);
+            await loadList();
+            return;
+          }
+          if(act === "del"){
+            if(!confirm(`確定刪除「${it.word}」？`)) return;
+            const { error } = await supabase.from("vocab").delete().eq("id", it.id);
+            if(error) return alert("刪除失敗：" + error.message);
+            await loadList();
+            return;
+          }
+          if(act === "plus"){
+            const now = new Date().toISOString();
+            const { error } = await supabase
+              .from("vocab")
+              .update({ count: (it.count||0) + 1, last_seen: now, updated_at: now })
+              .eq("id", it.id);
+            if(error) return alert("更新失敗：" + error.message);
+            await loadList();
+            return;
+          }
+        });
+
+        els.list.appendChild(div);
+      }
+    }
+
+    async function upsertWord(raw){
+      const w = normWord(raw);
+      if(!w || !user) return;
+
+      const { data: existing, error: qerr } = await supabase
+        .from("vocab")
+        .select("id, count")
+        .eq("user_id", user.id)
+        .eq("word", w)
+        .limit(1);
+
+      if(qerr) return alert("查詢失敗：" + qerr.message);
+
+      const now = new Date().toISOString();
+
+      if(existing && existing.length){
+        const row = existing[0];
+        const { error } = await supabase
+          .from("vocab")
+          .update({ count: (row.count||0) + 1, last_seen: now, updated_at: now })
+          .eq("id", row.id);
+        if(error) return alert("更新失敗：" + error.message);
+      } else {
+        const { error } = await supabase
+          .from("vocab")
+          .insert({ user_id: user.id, word: w, count: 1, created_at: now, last_seen: now, updated_at: now });
+        if(error) return alert("新增失敗：" + error.message);
+      }
+
+      await loadList();
+    }
+
+    els.addBtn.addEventListener("click", async () => {
+      await upsertWord(els.wordInput.value);
+      els.wordInput.value = "";
+      els.wordInput.focus();
+    });
+
+    els.wordInput.addEventListener("keydown", (e) => {
+      if(e.key === "Enter") els.addBtn.click();
+    });
+
+    els.searchInput.addEventListener("input", render);
+    els.sortSelect.addEventListener("change", render);
+
+    els.loginBtn.addEventListener("click", async () => {
+      const redirectTo = window.location.origin + window.location.pathname;
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider: "google",
+        options: { redirectTo }
+      });
+      if(error) alert("登入失敗：" + error.message);
+    });
+
+    els.logoutBtn.addEventListener("click", async () => {
+      await supabase.auth.signOut();
+      itemsCache = [];
+      render();
+      await refreshAuth();
+    });
+
+    (async () => {
+      await supabase.auth.getSession();
+      supabase.auth.onAuthStateChange(async () => {
+        await refreshAuth();
+      });
+      await refreshAuth();
+    })();
+  </script>
+</body>
+</html>
