@@ -112,7 +112,7 @@
     }
 
     async function refreshAuth(){
-      const { data } = await supabase.auth.getUser();
+      const { data } = await supabaseClient.auth.getUser();
       user = data?.user || null;
 
       if(!user){
@@ -308,7 +308,7 @@
           .eq("id", row.id);
         if(error) return alert("更新失敗：" + error.message);
       } else {
-        const { error } = await supabase
+        const { error } = await supabaseClient
           .from("vocab")
           .insert({ user_id: user.id, word: w, count: 1, created_at: now, last_seen: now, updated_at: now });
         if(error) return alert("新增失敗：" + error.message);
@@ -332,7 +332,7 @@
 
     els.loginBtn.addEventListener("click", async () => {
       const redirectTo = window.location.origin + window.location.pathname;
-      const { error } = await supabase.auth.signInWithOAuth({
+      const { error } = await supabaseClient.auth.signInWithOAuth({
         provider: "google",
         options: { redirectTo }
       });
@@ -340,15 +340,15 @@
     });
 
     els.logoutBtn.addEventListener("click", async () => {
-      await supabase.auth.signOut();
+      await supabaseClient.auth.signOut();
       itemsCache = [];
       render();
       await refreshAuth();
     });
 
     (async () => {
-      await supabase.auth.getSession();
-      supabase.auth.onAuthStateChange(async () => {
+      await supabaseClient.auth.getSession();
+      supabaseClient.auth.onAuthStateChange(async () => {
         await refreshAuth();
       });
       await refreshAuth();
