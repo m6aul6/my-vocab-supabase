@@ -133,7 +133,7 @@
     async function loadList(){
       if(!user) return;
 
-      const { data, error } = await supabase
+      const { data, error } = await supabaseClient
         .from("vocab")
         .select("*")
         .order("last_seen", { ascending: false })
