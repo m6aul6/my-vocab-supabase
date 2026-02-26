@@ -253,7 +253,7 @@
             const prepositions = uniq(prepsStr.split(",").map(s=>s.trim()).filter(Boolean));
             const now = new Date().toISOString();
 
-            const { error } = await supabase
+            const { error } = await supabaseClient.
               .from("vocab")
               .update({ zh, pos, example, prepositions, updated_at: now })
               .eq("id", it.id);
@@ -264,14 +264,14 @@
           }
           if(act === "del"){
             if(!confirm(`確定刪除「${it.word}」？`)) return;
-            const { error } = await supabase.from("vocab").delete().eq("id", it.id);
+            const { error } = await supabaseClient.from("vocab").delete().eq("id", it.id);
             if(error) return alert("刪除失敗：" + error.message);
             await loadList();
             return;
           }
           if(act === "plus"){
             const now = new Date().toISOString();
-            const { error } = await supabase
+            const { error } = await supabaseClient.
               .from("vocab")
               .update({ count: (it.count||0) + 1, last_seen: now, updated_at: now })
               .eq("id", it.id);
@@ -289,7 +289,7 @@
       const w = normWord(raw);
       if(!w || !user) return;
 
-      const { data: existing, error: qerr } = await supabase
+      const { data: existing, error: qerr } = await supabaseClient.
         .from("vocab")
         .select("id, count")
         .eq("user_id", user.id)
@@ -302,7 +302,7 @@
 
       if(existing && existing.length){
         const row = existing[0];
-        const { error } = await supabase
+        const { error } = await supabaseClient.
           .from("vocab")
           .update({ count: (row.count||0) + 1, last_seen: now, updated_at: now })
           .eq("id", row.id);
