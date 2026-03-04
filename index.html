@@ -46,7 +46,7 @@
       </div>
 
       <div class="notice">
-        這是「基礎可用版」：先把登入與雲端同步跑通。之後你想要自動抓中文/詞性/例句，我再幫你加上去。
+        你可以先用「加入 / +1 次」累積單字，再用「編輯 → 自動帶入（草稿）」讓 Gemini 幫你起草中文/詞性/例句/介係詞，仍保留你自己的修改空間。
       </div>
     </div>
 
@@ -70,196 +70,378 @@
       <div class="list" id="list" style="margin-top:12px;"></div>
     </div>
   </div>
-<script src="https://unpkg.com/@supabase/supabase-js@2.97.0/dist/umd/supabase.js"></script>
-<script>
-const SUPABASE_URL = "https://omegmriwanrgudhqyoha.supabase.co";
-const SUPABASE_ANON_KEY = "sb_publishable_OGKVj80-zcwumHWkIfg2bw_gn9bvt3a";
 
-const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+  <script src="https://unpkg.com/@supabase/supabase-js@2.97.0/dist/umd/supabase.js"></script>
+  <script>
+    // ====== 1) 先填你的 Supabase 設定 ======
+    const SUPABASE_URL = "https://omegmriwanrgudhqyoha.supabase.co";
+    const SUPABASE_ANON_KEY = "sb_publishable_OGKVj80-zcwumHWkIfg2bw_gn9bvt3a"; 
 
-const els = {
-  loginBtn: document.getElementById("loginBtn"),
-  logoutBtn: document.getElementById("logoutBtn"),
-  userInfo: document.getElementById("userInfo"),
-  main: document.getElementById("main"),
-  wordInput: document.getElementById("wordInput"),
-  addBtn: document.getElementById("addBtn"),
-  searchInput: document.getElementById("searchInput"),
-  sortSelect: document.getElementById("sortSelect"),
-  list: document.getElementById("list"),
-  stats: document.getElementById("stats"),
-};
+    const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-let user = null;
-let itemsCache = [];
+    const els = {
+      loginBtn: document.getElementById("loginBtn"),
+      logoutBtn: document.getElementById("logoutBtn"),
+      userInfo: document.getElementById("userInfo"),
+      main: document.getElementById("main"),
+      wordInput: document.getElementById("wordInput"),
+      addBtn: document.getElementById("addBtn"),
+      searchInput: document.getElementById("searchInput"),
+      sortSelect: document.getElementById("sortSelect"),
+      list: document.getElementById("list"),
+      stats: document.getElementById("stats"),
+    };
 
-function normWord(w){ return (w || "").trim().toLowerCase(); }
+    let user = null;
+    let itemsCache = [];
 
-function renderStars(level){
-  const lv = Math.max(1, Math.min(5, Number(level || 1)));
-  let html = "";
-  for(let i=1;i<=5;i++){
-    const filled = i <= lv;
-    html += `<button class="secondary" data-act="star" data-star="${i}">${filled ? "★" : "☆"}</button>`;
-  }
-  return html;
-}
+    function normWord(w){ return (w || "").trim().toLowerCase(); }
+    function uniq(arr){ return [...new Set((arr||[]).filter(Boolean))]; }
+    function escapeHTML(str){
+      return (str ?? "").toString()
+        .replaceAll("&","&amp;")
+        .replaceAll("<","&lt;")
+        .replaceAll(">","&gt;")
+        .replaceAll('"',"&quot;")
+        .replaceAll("'","&#039;");
+    }
 
-async function refreshAuth(){
-  const { data } = await supabaseClient.auth.getUser();
-  user = data?.user || null;
+    // ====== 2) 星級（熟悉度）渲染 ======
+    function renderStars(level){
+      const lv = Math.max(1, Math.min(5, Number(level || 1)));
+      let html = "";
+      for(let i=1;i<=5;i++){
+        const filled = i <= lv;
+        html += `<button class="secondary" data-act="star" data-star="${i}" style="padding:6px 10px;">${filled ? "★" : "☆"}</button>`;
+      }
+      return html;
+    }
 
-  if(!user){
-    els.userInfo.textContent = "尚未登入";
-    els.main.style.display = "none";
-    els.logoutBtn.style.display = "none";
-    els.loginBtn.style.display = "";
-    return;
-  }
+    // ====== 3) 呼叫 Netlify Function 取得 Gemini 草稿 ======
+    async function fetchGeminiDraft(word){
+      const r = await fetch(`/.netlify/functions/gemini-lookup?word=${encodeURIComponent(word)}`);
+      const j = await r.json().catch(() => ({}));
+      if(!r.ok) throw new Error(j?.error || "Gemini lookup failed");
+      return j; // { zh, pos, example, prepositions }
+    }
 
-  els.userInfo.textContent = `已登入：${user.email}`;
-  els.main.style.display = "";
-  els.logoutBtn.style.display = "";
-  els.loginBtn.style.display = "none";
-  await loadList();
-}
+    async function refreshAuth(){
+      const { data } = await supabaseClient.auth.getUser();
+      user = data?.user || null;
 
-async function loadList(){
-  if(!user) return;
-
-  const { data, error } = await supabaseClient
-    .from("vocab")
-    .select("*")
-    .order("last_seen", { ascending: false });
-
-  if(error){
-    alert(error.message);
-    return;
-  }
-
-  itemsCache = data || [];
-  render();
-}
-
-function render(){
-  els.list.innerHTML = "";
-
-  for(const it of itemsCache){
-    const div = document.createElement("div");
-    div.className = "item";
-
-    div.innerHTML = `
-      <div class="itemTop">
-        <div>
-          <span class="word">${it.word}</span>
-        </div>
-        <div class="meta">
-          次數：<b>${it.count || 0}</b>
-        </div>
-      </div>
-
-      <div style="margin-top:8px;">
-        <span class="muted">熟悉度</span>
-        ${renderStars(it.familiarity || 1)}
-      </div>
-
-      <div class="actions">
-        <button data-act="plus">+1</button>
-        <button data-act="del" class="danger">刪除</button>
-      </div>
-    `;
-
-    div.addEventListener("click", async (e) => {
-      const btn = e.target.closest("button");
-      if(!btn) return;
-
-      const act = btn.dataset.act;
-
-      if(act === "plus"){
-        await supabaseClient
-          .from("vocab")
-          .update({ count: (it.count||0)+1 })
-          .eq("id", it.id);
-        await loadList();
+      if(!user){
+        els.userInfo.textContent = "尚未登入";
+        els.main.style.display = "none";
+        els.logoutBtn.style.display = "none";
+        els.loginBtn.style.display = "";
+        return;
       }
 
-      if(act === "del"){
-        await supabaseClient
-          .from("vocab")
-          .delete()
-          .eq("id", it.id);
-        await loadList();
+      els.userInfo.textContent = `已登入：${user.email || user.id}`;
+      els.main.style.display = "";
+      els.logoutBtn.style.display = "";
+      els.loginBtn.style.display = "none";
+      await loadList();
+    }
+
+    async function loadList(){
+      if(!user) return;
+
+      const { data, error } = await supabaseClient
+        .from("vocab")
+        .select("*")
+        .order("last_seen", { ascending: false })
+        .limit(5000);
+
+      if(error){
+        alert("讀取失敗：" + error.message);
+        return;
       }
 
-      if(act === "star"){
-        const star = Number(btn.dataset.star);
-        await supabaseClient
-          .from("vocab")
-          .update({ familiarity: star })
-          .eq("id", it.id);
-        await loadList();
+      itemsCache = data || [];
+      render();
+    }
+
+    function getFilteredSorted(){
+      const q = (els.searchInput.value || "").trim().toLowerCase();
+      let arr = itemsCache;
+
+      if(q){
+        arr = arr.filter(it =>
+          (it.word || "").includes(q) ||
+          (it.zh || "").toLowerCase().includes(q) ||
+          (it.pos || "").toLowerCase().includes(q) ||
+          (it.example || "").toLowerCase().includes(q)
+        );
       }
+
+      const sort = els.sortSelect.value;
+      const cmp = {
+        lastSeen_desc: (a,b) => new Date(b.last_seen) - new Date(a.last_seen),
+        count_desc: (a,b) => (b.count||0) - (a.count||0),
+        created_desc: (a,b) => new Date(b.created_at) - new Date(a.created_at),
+        alpha_asc: (a,b) => (a.word||"").localeCompare(b.word||""),
+      }[sort] || (()=>0);
+
+      return [...arr].sort(cmp);
+    }
+
+    function render(){
+      const total = itemsCache.length;
+      const totalLookups = itemsCache.reduce((s,it)=> s + (it.count||0), 0);
+      els.stats.textContent = `共 ${total} 個單字｜累計查詢 ${totalLookups} 次`;
+
+      const arr = getFilteredSorted();
+      els.list.innerHTML = "";
+
+      if(arr.length === 0){
+        els.list.innerHTML = `<div class="muted">沒有資料（或搜尋不到）。</div>`;
+        return;
+      }
+
+      for(const it of arr){
+        const div = document.createElement("div");
+        div.className = "item";
+
+        const preps = (it.prepositions || []).map(p => `<span class="pill">${escapeHTML(p)}</span>`).join("");
+
+        div.innerHTML = `
+          <div class="itemTop">
+            <div>
+              <span class="word">${escapeHTML(it.word)}</span>
+              ${it.pos ? `<span class="pill">${escapeHTML(it.pos)}</span>` : ""}
+            </div>
+
+            <!-- ✅ 只留次數，不顯示時間 -->
+            <div class="meta">
+              次數：<b>${it.count || 0}</b>
+            </div>
+          </div>
+
+          <!-- ✅ 熟悉度星級 -->
+          <div class="actions" style="margin-top:8px;">
+            <span class="muted" style="margin-right:8px;">熟悉度</span>
+            ${renderStars(it.familiarity || 1)}
+          </div>
+
+          <div class="kv"><b>中文解釋</b> ${escapeHTML(it.zh || "")}</div>
+          <div class="kv"><b>例句</b> ${escapeHTML(it.example || "")}</div>
+          <div class="kv"><b>介係詞</b> ${preps || `<span class="muted">（可編輯補上）</span>`}</div>
+
+          <div class="actions">
+            <button class="secondary" data-act="edit">編輯</button>
+            <button class="secondary" data-act="plus">再查一次（+1）</button>
+            <button class="danger" data-act="del">刪除</button>
+          </div>
+
+          <div data-edit style="display:none; margin-top:10px;">
+            <div class="grid2">
+              <div>
+                <div class="muted">中文解釋</div>
+                <textarea data-in="zh">${escapeHTML(it.zh||"")}</textarea>
+              </div>
+              <div>
+                <div class="muted">詞性（noun / verb / adj...）</div>
+                <input data-in="pos" value="${escapeHTML(it.pos||"")}" />
+                <div class="muted" style="margin-top:8px;">介係詞（逗號分隔）</div>
+                <input data-in="preps" value="${escapeHTML((it.prepositions||[]).join(", "))}" />
+              </div>
+            </div>
+
+            <div class="muted" style="margin-top:8px;">例句</div>
+            <textarea data-in="example">${escapeHTML(it.example||"")}</textarea>
+
+            <div class="actions">
+              <!-- ✅ Gemini 草稿：只填空白欄位，不覆蓋你已寫的 -->
+              <button class="secondary" data-act="draft">自動帶入（草稿）</button>
+              <button data-act="save">儲存</button>
+              <button class="secondary" data-act="cancel">取消</button>
+            </div>
+          </div>
+        `;
+
+        div.addEventListener("click", async (e) => {
+          const btn = e.target.closest("button");
+          if(!btn) return;
+          const act = btn.dataset.act;
+
+          // ⭐ 星星：更新熟悉度
+          if(act === "star"){
+            const star = Number(btn.dataset.star || 1);
+            const now = new Date().toISOString();
+
+            const { error } = await supabaseClient
+              .from("vocab")
+              .update({ familiarity: star, updated_at: now })
+              .eq("id", it.id);
+
+            if(error) return alert("更新熟悉度失敗：" + error.message);
+            await loadList();
+            return;
+          }
+
+          if(act === "edit"){
+            div.querySelector('[data-edit]').style.display = "";
+            return;
+          }
+
+          if(act === "cancel"){
+            div.querySelector('[data-edit]').style.display = "none";
+            return;
+          }
+
+          // 🤖 Gemini 草稿：只填空白欄位
+          if(act === "draft"){
+            try{
+              btn.textContent = "生成中…";
+              btn.disabled = true;
+
+              const draft = await fetchGeminiDraft(it.word);
+
+              const zhEl = div.querySelector('[data-in="zh"]');
+              const posEl = div.querySelector('[data-in="pos"]');
+              const exEl  = div.querySelector('[data-in="example"]');
+              const prepsEl = div.querySelector('[data-in="preps"]');
+
+              if(zhEl && !zhEl.value.trim() && draft.zh) zhEl.value = draft.zh;
+              if(posEl && !posEl.value.trim() && draft.pos) posEl.value = draft.pos;
+              if(exEl && !exEl.value.trim() && draft.example) exEl.value = draft.example;
+
+              if(prepsEl && !prepsEl.value.trim() && Array.isArray(draft.prepositions)){
+                prepsEl.value = draft.prepositions.join(", ");
+              }
+            }catch(err){
+              alert("草稿取得失敗：" + (err?.message || err));
+            }finally{
+              btn.textContent = "自動帶入（草稿）";
+              btn.disabled = false;
+            }
+            return;
+          }
+
+          if(act === "save"){
+            const zh = div.querySelector('[data-in="zh"]').value.trim();
+            const pos = div.querySelector('[data-in="pos"]').value.trim();
+            const example = div.querySelector('[data-in="example"]').value.trim();
+            const prepsStr = div.querySelector('[data-in="preps"]').value.trim();
+            const prepositions = uniq(prepsStr.split(",").map(s=>s.trim()).filter(Boolean));
+            const now = new Date().toISOString();
+
+            const { error } = await supabaseClient
+              .from("vocab")
+              .update({ zh, pos, example, prepositions, updated_at: now })
+              .eq("id", it.id);
+
+            if(error) return alert("儲存失敗：" + error.message);
+            await loadList();
+            return;
+          }
+
+          if(act === "del"){
+            if(!confirm(`確定刪除「${it.word}」？`)) return;
+            const { error } = await supabaseClient
+              .from("vocab")
+              .delete()
+              .eq("id", it.id);
+
+            if(error) return alert("刪除失敗：" + error.message);
+            await loadList();
+            return;
+          }
+
+          if(act === "plus"){
+            const now = new Date().toISOString();
+            const { error } = await supabaseClient
+              .from("vocab")
+              .update({ count: (it.count||0) + 1, last_seen: now, updated_at: now })
+              .eq("id", it.id);
+
+            if(error) return alert("更新失敗：" + error.message);
+            await loadList();
+            return;
+          }
+        });
+
+        els.list.appendChild(div);
+      }
+    }
+
+    async function upsertWord(raw){
+      const w = normWord(raw);
+      if(!w || !user) return;
+
+      const now = new Date().toISOString();
+
+      const { data: existing, error: qerr } = await supabaseClient
+        .from("vocab")
+        .select("id, count")
+        .eq("user_id", user.id)
+        .eq("word", w)
+        .limit(1);
+
+      if(qerr) return alert("查詢失敗：" + qerr.message);
+
+      if(existing && existing.length){
+        const row = existing[0];
+        const { error } = await supabaseClient
+          .from("vocab")
+          .update({ count: (row.count||0) + 1, last_seen: now, updated_at: now })
+          .eq("id", row.id);
+        if(error) return alert("更新失敗：" + error.message);
+      } else {
+        const { error } = await supabaseClient
+          .from("vocab")
+          .insert({
+            user_id: user.id,
+            word: w,
+            familiarity: 1,
+            count: 1,
+            created_at: now,
+            last_seen: now,
+            updated_at: now
+          });
+        if(error) return alert("新增失敗：" + error.message);
+      }
+
+      await loadList();
+    }
+
+    els.addBtn.addEventListener("click", async () => {
+      await upsertWord(els.wordInput.value);
+      els.wordInput.value = "";
+      els.wordInput.focus();
     });
 
-    els.list.appendChild(div);
-  }
-}
+    els.wordInput.addEventListener("keydown", (e) => {
+      if(e.key === "Enter") els.addBtn.click();
+    });
 
-async function upsertWord(raw){
-  const w = normWord(raw);
-  if(!w || !user) return;
+    els.searchInput.addEventListener("input", render);
+    els.sortSelect.addEventListener("change", render);
 
-  const now = new Date().toISOString();
-
-  const { data } = await supabaseClient
-    .from("vocab")
-    .select("id,count")
-    .eq("user_id", user.id)
-    .eq("word", w)
-    .limit(1);
-
-  if(data && data.length){
-    await supabaseClient
-      .from("vocab")
-      .update({ count: (data[0].count||0)+1, last_seen: now })
-      .eq("id", data[0].id);
-  } else {
-    await supabaseClient
-      .from("vocab")
-      .insert({
-        user_id: user.id,
-        word: w,
-        familiarity: 1,
-        count: 1,
-        created_at: now,
-        last_seen: now
+    els.loginBtn.addEventListener("click", async () => {
+      const redirectTo = window.location.origin + window.location.pathname;
+      const { error } = await supabaseClient.auth.signInWithOAuth({
+        provider: "google",
+        options: { redirectTo }
       });
-  }
+      if(error) alert("登入失敗：" + error.message);
+    });
 
-  await loadList();
-}
+    els.logoutBtn.addEventListener("click", async () => {
+      await supabaseClient.auth.signOut();
+      itemsCache = [];
+      render();
+      await refreshAuth();
+    });
 
-els.addBtn.addEventListener("click", async () => {
-  await upsertWord(els.wordInput.value);
-  els.wordInput.value = "";
-});
-
-els.loginBtn.addEventListener("click", async () => {
-  await supabaseClient.auth.signInWithOAuth({
-    provider: "google",
-    options: { redirectTo: window.location.origin }
-  });
-});
-
-els.logoutBtn.addEventListener("click", async () => {
-  await supabaseClient.auth.signOut();
-  await refreshAuth();
-});
-
-(async () => {
-  await refreshAuth();
-})();
-</script>
-  
+    (async () => {
+      await supabaseClient.auth.getSession();
+      supabaseClient.auth.onAuthStateChange(async () => {
+        await refreshAuth();
+      });
+      await refreshAuth();
+    })();
+  </script>
 </body>
 </html>
