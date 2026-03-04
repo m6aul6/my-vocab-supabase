@@ -20,7 +20,7 @@ export default async (req) => {
     }
 
     const endpoint =
-      "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent";
+      "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent";
 
     const prompt = `
 你是英文學習助教。請針對單字 "${word}" 產生「可編輯草稿」資料，請只輸出 JSON（不要多任何文字），格式如下：
