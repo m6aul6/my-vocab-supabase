@@ -420,13 +420,16 @@
     els.sortSelect.addEventListener("change", render);
 
     els.loginBtn.addEventListener("click", async () => {
-      const redirectTo = window.location.origin + window.location.pathname;
-      const { error } = await supabaseClient.auth.signInWithOAuth({
-        provider: "google",
-        options: { redirectTo }
-      });
-      if(error) alert("登入失敗：" + error.message);
-    });
+  // ✅ 回到目前頁面（GitHub Pages 的 /my-vocab-supabase/ 也會被保留）
+  const redirectTo = window.location.href.split("#")[0];
+
+  const { error } = await supabaseClient.auth.signInWithOAuth({
+    provider: "google",
+    options: { redirectTo }
+  });
+
+  if (error) alert("登入失敗：" + error.message);
+});
 
     els.logoutBtn.addEventListener("click", async () => {
       await supabaseClient.auth.signOut();
