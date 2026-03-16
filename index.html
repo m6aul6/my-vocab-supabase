@@ -132,6 +132,17 @@ async function fetchGeminiDraft(word){
   );
 
   const j = await r.json().catch(() => ({}));
+  if(!r.ok) throw new Error(j?.detail || j?.error || "Gemini lookup failed");
+  return j;
+}
+      headers: {
+        "apikey": SUPABASE_ANON_KEY,
+        "Authorization": `Bearer ${SUPABASE_ANON_KEY}`
+      }
+    }
+  );
+
+  const j = await r.json().catch(() => ({}));
   if(!r.ok) throw new Error(j?.error || "Gemini lookup failed");
   return j;
 }
