@@ -117,13 +117,24 @@
       return html;
     }
 
-    // ====== 3) 呼叫 Netlify Function 取得 Gemini 草稿 ======
-    async function fetchGeminiDraft(word){
-      const r = await fetch(`/.netlify/functions/gemini-lookup?word=${encodeURIComponent(word)}`);
-      const j = await r.json().catch(() => ({}));
-      if(!r.ok) throw new Error(j?.error || "Gemini lookup failed");
-      return j; // { zh, pos, example, prepositions }
+    // ====== 3) 呼叫 Supabase Edge Function 取得 Gemini 草稿 ======
+   const SUPABASE_FUNCTION_URL = "https://omegmriwanrgudhqyoha.functions.supabase.co/gemini-lookup";
+
+async function fetchGeminiDraft(word){
+  const r = await fetch(
+    `https://omegmriwanrgudhqyoha.supabase.co/functions/v1/gemini-lookup?word=${encodeURIComponent(word)}`,
+    {
+      headers: {
+        "apikey": SUPABASE_ANON_KEY,
+        "Authorization": `Bearer ${SUPABASE_ANON_KEY}`
+      }
     }
+  );
+
+  const j = await r.json().catch(() => ({}));
+  if(!r.ok) throw new Error(j?.error || "Gemini lookup failed");
+  return j;
+}
 
     async function refreshAuth(){
       const { data } = await supabaseClient.auth.getUser();
