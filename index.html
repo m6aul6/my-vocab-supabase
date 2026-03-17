@@ -73,9 +73,8 @@
 
   <script src="https://unpkg.com/@supabase/supabase-js@2.97.0/dist/umd/supabase.js"></script>
   <script>
-    // ====== 1) 先填你的 Supabase 設定 ======
     const SUPABASE_URL = "https://omegmriwanrgudhqyoha.supabase.co";
-    const SUPABASE_ANON_KEY = "sb_publishable_OGKVj80-zcwumHWkIfg2bw_gn9bvt3a"; 
+    const SUPABASE_ANON_KEY = "sb_publishable_OGKVj80-zcwumHWkIfg2bw_gn9bvt3a";
 
     const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
@@ -106,7 +105,6 @@
         .replaceAll("'","&#039;");
     }
 
-    // ====== 2) 星級（熟悉度）渲染 ======
     function renderStars(level){
       const lv = Math.max(1, Math.min(5, Number(level || 1)));
       let html = "";
@@ -117,35 +115,40 @@
       return html;
     }
 
-    // ====== 3) 呼叫 Supabase Edge Function 取得 Gemini 草稿 ======
-   const SUPABASE_FUNCTION_URL = "https://omegmriwanrgudhqyoha.functions.supabase.co/gemini-lookup";
+    async function fetchGeminiDraft(word){
+      const { data: { session } } = await supabaseClient.auth.getSession();
 
-async function fetchGeminiDraft(word){
-  const r = await fetch(
-    `https://omegmriwanrgudhqyoha.supabase.co/functions/v1/gemini-lookup?word=${encodeURIComponent(word)}`,
-    {
-      headers: {
-        "apikey": SUPABASE_ANON_KEY,
-        "Authorization": `Bearer ${SUPABASE_ANON_KEY}`
+      const r = await fetch(
+        `https://omegmriwanrgudhqyoha.supabase.co/functions/v1/gemini-lookup?word=${encodeURIComponent(word)}`,
+        {
+          method: "GET",
+          headers: {
+            "apikey": SUPABASE_ANON_KEY,
+            "Authorization": `Bearer ${session?.access_token || ""}`
+          }
+        }
+      );
+
+      const text = await r.text();
+      let j = {};
+      try {
+        j = JSON.parse(text);
+      } catch {
+        j = { raw: text };
       }
-    }
-  );
 
-  const j = await r.json().catch(() => ({}));
-  if(!r.ok) throw new Error(j?.detail || j?.error || "Gemini lookup failed");
-  return j;
-}
-      headers: {
-        "apikey": SUPABASE_ANON_KEY,
-        "Authorization": `Bearer ${SUPABASE_ANON_KEY}`
+      if(!r.ok){
+        throw new Error(
+          j?.detail ||
+          j?.error ||
+          j?.message ||
+          j?.raw ||
+          `Gemini lookup failed (${r.status})`
+        );
       }
-    }
-  );
 
-  const j = await r.json().catch(() => ({}));
-  if(!r.ok) throw new Error(j?.error || "Gemini lookup failed");
-  return j;
-}
+      return j;
+    }
 
     async function refreshAuth(){
       const { data } = await supabaseClient.auth.getUser();
@@ -234,13 +237,11 @@ async function fetchGeminiDraft(word){
               ${it.pos ? `<span class="pill">${escapeHTML(it.pos)}</span>` : ""}
             </div>
 
-            <!-- ✅ 只留次數，不顯示時間 -->
             <div class="meta">
               次數：<b>${it.count || 0}</b>
             </div>
           </div>
 
-          <!-- ✅ 熟悉度星級 -->
           <div class="actions" style="margin-top:8px;">
             <span class="muted" style="margin-right:8px;">熟悉度</span>
             ${renderStars(it.familiarity || 1)}
@@ -274,7 +275,6 @@ async function fetchGeminiDraft(word){
             <textarea data-in="example">${escapeHTML(it.example||"")}</textarea>
 
             <div class="actions">
-              <!-- ✅ Gemini 草稿：只填空白欄位，不覆蓋你已寫的 -->
               <button class="secondary" data-act="draft">自動帶入（草稿）</button>
               <button data-act="save">儲存</button>
               <button class="secondary" data-act="cancel">取消</button>
@@ -287,7 +287,6 @@ async function fetchGeminiDraft(word){
           if(!btn) return;
           const act = btn.dataset.act;
 
-          // ⭐ 星星：更新熟悉度
           if(act === "star"){
             const star = Number(btn.dataset.star || 1);
             const now = new Date().toISOString();
@@ -312,7 +311,6 @@ async function fetchGeminiDraft(word){
             return;
           }
 
-          // 🤖 Gemini 草稿：只填空白欄位
           if(act === "draft"){
             try{
               btn.textContent = "生成中…";
@@ -333,6 +331,7 @@ async function fetchGeminiDraft(word){
                 prepsEl.value = draft.prepositions.join(", ");
               }
             }catch(err){
+              console.error("Draft error:", err);
               alert("草稿取得失敗：" + (err?.message || err));
             }finally{
               btn.textContent = "自動帶入（草稿）";
@@ -442,16 +441,15 @@ async function fetchGeminiDraft(word){
     els.sortSelect.addEventListener("change", render);
 
     els.loginBtn.addEventListener("click", async () => {
-  // ✅ 回到目前頁面（GitHub Pages 的 /my-vocab-supabase/ 也會被保留）
-  const redirectTo = window.location.href.split("#")[0];
+      const redirectTo = window.location.href.split("#")[0];
 
-  const { error } = await supabaseClient.auth.signInWithOAuth({
-    provider: "google",
-    options: { redirectTo }
-  });
+      const { error } = await supabaseClient.auth.signInWithOAuth({
+        provider: "google",
+        options: { redirectTo }
+      });
 
-  if (error) alert("登入失敗：" + error.message);
-});
+      if (error) alert("登入失敗：" + error.message);
+    });
 
     els.logoutBtn.addEventListener("click", async () => {
       await supabaseClient.auth.signOut();
