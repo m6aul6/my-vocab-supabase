@@ -117,7 +117,7 @@
 
     async function fetchGeminiDraft(word){
   const r = await fetch(
-    `https://omegmriwanrgudhqyoha.supabase.co/functions/v1/gemini-lookup?word=${encodeURIComponent(word)}`
+    `https://omegmriwanrgudhqyoha.supabase.co/functions/v1/gemini-lookup-open?word=${encodeURIComponent(word)}`
   );
 
   const text = await r.text();
