@@ -117,12 +117,19 @@
 
     async function fetchGeminiDraft(word){
 
+  const { data: { session } } = await supabaseClient.auth.getSession();
+
+  if (!session) {
+    throw new Error("請先登入");
+  }
+
   const r = await fetch(
     `https://omegmriwanrgudhqyoha.supabase.co/functions/v1/gemini-lookup?word=${encodeURIComponent(word)}`,
     {
       method: "GET",
       headers: {
-        "apikey": SUPABASE_ANON_KEY
+        "apikey": SUPABASE_ANON_KEY,
+        "Authorization": `Bearer ${session.access_token}`
       }
     }
   );
