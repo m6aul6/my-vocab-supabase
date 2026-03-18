@@ -126,20 +126,13 @@
       resize: vertical;
     }
 
-    select:disabled,
-    textarea:disabled,
-    input:disabled {
-      background: #f3f4f6;
-      color: #9ca3af;
-    }
-
     button {
       cursor: pointer;
       background: var(--accent);
       color: #fff;
       border: 0;
       font-weight: 600;
-      transition: transform .15s ease, opacity .15s ease, background .15s ease;
+      transition: transform .15s ease, opacity .15s ease;
     }
 
     button:hover { opacity: .92; }
@@ -361,7 +354,7 @@
   <div class="wrap">
     <div class="hero">
       <h1>我的單字本</h1>
-      <p>一天一單字，會其來有自。</p>
+      <p>一天一單字，木蘭當戶織。</p>
     </div>
 
     <div class="card">
@@ -488,9 +481,9 @@
       return `<span class="entryTag ${cls}">${escapeHTML(safeType)}</span>`;
     }
 
-    function renderPosSelect(selectedValue = "", isPhrase = false){
+    function renderPosSelect(selectedValue = ""){
       return `
-        <select data-in="pos" ${isPhrase ? "disabled" : ""}>
+        <select data-in="pos">
           ${POS_OPTIONS.map(pos => {
             const label = pos === "" ? "可留空" : pos;
             const selected = (selectedValue || "") === pos ? "selected" : "";
@@ -619,7 +612,7 @@
             <div class="wordWrap">
               <span class="word">${escapeHTML(it.word)}</span>
               ${renderEntryTag(entryType)}
-              ${it.pos ? `<span class="pill">${escapeHTML(it.pos)}</span>` : ""}
+              ${(!isPhrase && it.pos) ? `<span class="pill">${escapeHTML(it.pos)}</span>` : ""}
               ${isInReview ? `<span class="reviewTag">今日複習</span>` : ""}
             </div>
             <div class="meta">查詢次數：<b>${it.count || 0}</b></div>
@@ -640,10 +633,12 @@
             ${escapeHTML(it.example || "") || "—"}
           </div>
 
-          <div class="kv">
-           <b>${entryType === "片語" ? "搭配 / 結構" : "介係詞"}</b>
-           ${preps || `<span class="muted">尚未填寫</span>`}
-          </div>
+          ${!isPhrase ? `
+            <div class="kv">
+              <b>介係詞</b>
+              ${preps || `<span class="muted">尚未填寫</span>`}
+            </div>
+          ` : ""}
 
           <div class="kv">
             <b>備註</b>
@@ -668,19 +663,19 @@
                   <option value="片語" ${entryType === "片語" ? "selected" : ""}>片語</option>
                 </select>
 
-                <div class="muted" style="margin:10px 0 6px;">詞性</div>
                 <div data-pos-wrap>
-                  ${renderPosSelect(it.pos || "", isPhrase)}
+                  ${!isPhrase ? `
+                    <div class="muted" style="margin:10px 0 6px;">詞性</div>
+                    ${renderPosSelect(it.pos || "")}
+                  ` : ""}
                 </div>
 
-                <div class="muted" style="margin:10px 0 6px;">
-  ${entryType === "片語" ? "搭配 / 結構（逗號分隔）" : "介係詞（逗號分隔）"}
-</div>
-<input 
-  data-in="preps" 
-  placeholder="${entryType === "片語" ? "例如：be accountable for" : "例如：for, to, with"}"
-  value="${escapeHTML((it.prepositions||[]).join(", "))}" 
-/>
+                <div data-preps-wrap>
+                  ${!isPhrase ? `
+                    <div class="muted" style="margin:10px 0 6px;">介係詞（逗號分隔）</div>
+                    <input data-in="preps" value="${escapeHTML((it.prepositions||[]).join(", "))}" />
+                  ` : ""}
+                </div>
               </div>
             </div>
 
@@ -700,13 +695,33 @@
         const entryTypeSelect = div.querySelector('[data-in="entry_type"]');
         if (entryTypeSelect) {
           entryTypeSelect.addEventListener("change", () => {
-            const wrap = div.querySelector('[data-pos-wrap]');
-            if (!wrap) return;
             const currentType = entryTypeSelect.value;
-            const currentPos = currentType === "片語"
-              ? ""
-              : (div.querySelector('[data-in="pos"]')?.value || "");
-            wrap.innerHTML = renderPosSelect(currentPos, currentType === "片語");
+            const posWrap = div.querySelector('[data-pos-wrap]');
+            const prepsWrap = div.querySelector('[data-preps-wrap]');
+
+            if (posWrap) {
+              if (currentType === "片語") {
+                posWrap.innerHTML = "";
+              } else {
+                const currentPos = div.querySelector('[data-in="pos"]')?.value || "";
+                posWrap.innerHTML = `
+                  <div class="muted" style="margin:10px 0 6px;">詞性</div>
+                  ${renderPosSelect(currentPos)}
+                `;
+              }
+            }
+
+            if (prepsWrap) {
+              if (currentType === "片語") {
+                prepsWrap.innerHTML = "";
+              } else {
+                const currentPreps = div.querySelector('[data-in="preps"]')?.value || "";
+                prepsWrap.innerHTML = `
+                  <div class="muted" style="margin:10px 0 6px;">介係詞（逗號分隔）</div>
+                  <input data-in="preps" value="${escapeHTML(currentPreps)}" />
+                `;
+              }
+            }
           });
         }
 
@@ -745,8 +760,10 @@
             let pos = div.querySelector('[data-in="pos"]')?.value?.trim() || "";
             const example = div.querySelector('[data-in="example"]').value.trim();
             const note = div.querySelector('[data-in="note"]').value.trim();
-            const prepsStr = div.querySelector('[data-in="preps"]').value.trim();
-            const prepositions = uniq(prepsStr.split(",").map(s=>s.trim()).filter(Boolean));
+            const prepsStr = div.querySelector('[data-in="preps"]')?.value?.trim() || "";
+            const prepositions = entry_type === "片語"
+              ? []
+              : uniq(prepsStr.split(",").map(s=>s.trim()).filter(Boolean));
             const now = new Date().toISOString();
 
             if (entry_type === "片語") {
@@ -812,6 +829,7 @@
             word: w,
             entry_type,
             pos: "",
+            prepositions: [],
             familiarity: 1,
             count: 1,
             created_at: now,
