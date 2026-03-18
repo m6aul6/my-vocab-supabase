@@ -641,8 +641,8 @@
           </div>
 
           <div class="kv">
-            <b>介係詞</b>
-            ${preps || `<span class="muted">尚未填寫</span>`}
+           <b>${entryType === "片語" ? "搭配 / 結構" : "介係詞"}</b>
+           ${preps || `<span class="muted">尚未填寫</span>`}
           </div>
 
           <div class="kv">
@@ -673,8 +673,14 @@
                   ${renderPosSelect(it.pos || "", isPhrase)}
                 </div>
 
-                <div class="muted" style="margin:10px 0 6px;">介係詞（逗號分隔）</div>
-                <input data-in="preps" value="${escapeHTML((it.prepositions||[]).join(", "))}" />
+                <div class="muted" style="margin:10px 0 6px;">
+  ${entryType === "片語" ? "搭配 / 結構（逗號分隔）" : "介係詞（逗號分隔）"}
+</div>
+<input 
+  data-in="preps" 
+  placeholder="${entryType === "片語" ? "例如：be accountable for" : "例如：for, to, with"}"
+  value="${escapeHTML((it.prepositions||[]).join(", "))}" 
+/>
               </div>
             </div>
 
