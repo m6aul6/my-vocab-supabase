@@ -82,7 +82,7 @@
       flex-wrap: wrap;
     }
 
-    input, textarea, select, button {
+    input, button, textarea, select {
       border-radius: 14px;
       border: 1px solid var(--line);
       background: #fff;
@@ -152,6 +152,19 @@
       grid-template-columns: 1fr 180px;
       gap: 10px;
       margin-top: 12px;
+    }
+
+    .reviewBar {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      margin-top: 12px;
+    }
+
+    .reviewHint {
+      font-size: 13px;
+      color: var(--sub);
+      margin-top: 8px;
     }
 
     .list {
@@ -277,6 +290,17 @@
       border: 1px dashed var(--line);
     }
 
+    .reviewTag {
+      display: inline-block;
+      margin-left: 8px;
+      padding: 4px 8px;
+      border-radius: 999px;
+      background: #fff4cc;
+      color: #7a5b00;
+      font-size: 12px;
+      font-weight: 600;
+    }
+
     @media (max-width: 720px) {
       .wrap { padding: 14px 12px 24px; }
       .hero h1 { font-size: 26px; }
@@ -291,7 +315,7 @@
   <div class="wrap">
     <div class="hero">
       <h1>我的單字本</h1>
-      <p>簡潔、同步、可匯出，像 iPhone 裡的一個小工具。</p>
+      <p>簡潔、同步、可匯出，還能每天小量複習。</p>
     </div>
 
     <div class="card">
@@ -311,8 +335,14 @@
         <button id="exportBtn" class="secondary">匯出 Excel</button>
       </div>
 
+      <div class="reviewBar">
+        <button id="reviewBtn" class="secondary">今日複習</button>
+        <button id="showAllBtn" class="secondary">顯示全部</button>
+      </div>
+      <div class="reviewHint" id="reviewHint">尚未啟用今日複習。</div>
+
       <div class="filters">
-        <input id="searchInput" placeholder="搜尋單字、中文、例句…" />
+        <input id="searchInput" placeholder="搜尋單字、中文、例句、備註…" />
         <select id="sortSelect">
           <option value="lastSeen_desc">排序：最近查過</option>
           <option value="count_desc">排序：查詢次數</option>
@@ -331,7 +361,7 @@
 
   <script>
     const SUPABASE_URL = "https://omegmriwanrgudhqyoha.supabase.co";
-    const SUPABASE_ANON_KEY = "sb_publishable_OGKVj80-zcwumHWkIfg2bw_gn9bvt3a";
+    const SUPABASE_ANON_KEY = "請改成你自己的 anon key";
 
     const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
@@ -343,6 +373,9 @@
       wordInput: document.getElementById("wordInput"),
       addBtn: document.getElementById("addBtn"),
       exportBtn: document.getElementById("exportBtn"),
+      reviewBtn: document.getElementById("reviewBtn"),
+      showAllBtn: document.getElementById("showAllBtn"),
+      reviewHint: document.getElementById("reviewHint"),
       searchInput: document.getElementById("searchInput"),
       sortSelect: document.getElementById("sortSelect"),
       list: document.getElementById("list"),
@@ -351,9 +384,12 @@
 
     let user = null;
     let itemsCache = [];
+    let reviewMode = false;
+    let reviewIds = [];
 
     function normWord(w){ return (w || "").trim().toLowerCase(); }
     function uniq(arr){ return [...new Set((arr||[]).filter(Boolean))]; }
+
     function escapeHTML(str){
       return (str ?? "").toString()
         .replaceAll("&","&amp;")
@@ -371,6 +407,51 @@
         html += `<button class="secondary" data-act="star" data-star="${i}">${filled ? "★" : "☆"}</button>`;
       }
       return html;
+    }
+
+    function getFilteredSorted(){
+      const q = (els.searchInput.value || "").trim().toLowerCase();
+      let arr = itemsCache;
+
+      if (reviewMode) {
+        arr = arr.filter(it => reviewIds.includes(it.id));
+      }
+
+      if(q){
+        arr = arr.filter(it =>
+          (it.word || "").includes(q) ||
+          (it.zh || "").toLowerCase().includes(q) ||
+          (it.pos || "").toLowerCase().includes(q) ||
+          (it.example || "").toLowerCase().includes(q) ||
+          (it.note || "").toLowerCase().includes(q)
+        );
+      }
+
+      const sort = els.sortSelect.value;
+      const cmp = {
+        lastSeen_desc: (a,b) => new Date(b.last_seen) - new Date(a.last_seen),
+        count_desc: (a,b) => (b.count||0) - (a.count||0),
+        created_desc: (a,b) => new Date(b.created_at) - new Date(a.created_at),
+        alpha_asc: (a,b) => (a.word||"").localeCompare(b.word||""),
+      }[sort] || (()=>0);
+
+      return [...arr].sort(cmp);
+    }
+
+    function buildReviewList() {
+      const ranked = [...itemsCache].sort((a, b) => {
+        const fa = a.familiarity || 1;
+        const fb = b.familiarity || 1;
+        if (fa !== fb) return fa - fb;
+
+        const ca = a.count || 0;
+        const cb = b.count || 0;
+        if (ca !== cb) return ca - cb;
+
+        return new Date(a.last_seen || 0) - new Date(b.last_seen || 0);
+      });
+
+      return ranked.slice(0, 10).map(it => it.id);
     }
 
     async function refreshAuth(){
@@ -410,30 +491,6 @@
       render();
     }
 
-    function getFilteredSorted(){
-      const q = (els.searchInput.value || "").trim().toLowerCase();
-      let arr = itemsCache;
-
-      if(q){
-        arr = arr.filter(it =>
-          (it.word || "").includes(q) ||
-          (it.zh || "").toLowerCase().includes(q) ||
-          (it.pos || "").toLowerCase().includes(q) ||
-          (it.example || "").toLowerCase().includes(q)
-        );
-      }
-
-      const sort = els.sortSelect.value;
-      const cmp = {
-        lastSeen_desc: (a,b) => new Date(b.last_seen) - new Date(a.last_seen),
-        count_desc: (a,b) => (b.count||0) - (a.count||0),
-        created_desc: (a,b) => new Date(b.created_at) - new Date(a.created_at),
-        alpha_asc: (a,b) => (a.word||"").localeCompare(b.word||""),
-      }[sort] || (()=>0);
-
-      return [...arr].sort(cmp);
-    }
-
     function render(){
       const total = itemsCache.length;
       const totalLookups = itemsCache.reduce((s,it)=> s + (it.count||0), 0);
@@ -443,7 +500,7 @@
       els.list.innerHTML = "";
 
       if(arr.length === 0){
-        els.list.innerHTML = `<div class="empty">還沒有單字，從第一個開始吧。</div>`;
+        els.list.innerHTML = `<div class="empty">目前沒有符合條件的單字。</div>`;
         return;
       }
 
@@ -452,12 +509,14 @@
         div.className = "item";
 
         const preps = (it.prepositions || []).map(p => `<span class="pill">${escapeHTML(p)}</span>`).join("");
+        const isInReview = reviewMode && reviewIds.includes(it.id);
 
         div.innerHTML = `
           <div class="itemTop">
             <div class="wordWrap">
               <span class="word">${escapeHTML(it.word)}</span>
               ${it.pos ? `<span class="pill">${escapeHTML(it.pos)}</span>` : ""}
+              ${isInReview ? `<span class="reviewTag">今日複習</span>` : ""}
             </div>
             <div class="meta">查詢次數：<b>${it.count || 0}</b></div>
           </div>
@@ -482,6 +541,11 @@
             ${preps || `<span class="muted">尚未填寫</span>`}
           </div>
 
+          <div class="kv">
+            <b>備註</b>
+            ${escapeHTML(it.note || "") || "—"}
+          </div>
+
           <div class="actions">
             <button class="secondary" data-act="edit">編輯</button>
             <button class="danger" data-act="del">刪除</button>
@@ -503,6 +567,9 @@
 
             <div class="muted" style="margin:12px 0 6px;">例句</div>
             <textarea data-in="example">${escapeHTML(it.example||"")}</textarea>
+
+            <div class="muted" style="margin:12px 0 6px;">備註</div>
+            <textarea data-in="note">${escapeHTML(it.note||"")}</textarea>
 
             <div class="actions">
               <button data-act="save">儲存</button>
@@ -544,13 +611,14 @@
             const zh = div.querySelector('[data-in="zh"]').value.trim();
             const pos = div.querySelector('[data-in="pos"]').value.trim();
             const example = div.querySelector('[data-in="example"]').value.trim();
+            const note = div.querySelector('[data-in="note"]').value.trim();
             const prepsStr = div.querySelector('[data-in="preps"]').value.trim();
             const prepositions = uniq(prepsStr.split(",").map(s=>s.trim()).filter(Boolean));
             const now = new Date().toISOString();
 
             const { error } = await supabaseClient
               .from("vocab")
-              .update({ zh, pos, example, prepositions, updated_at: now })
+              .update({ zh, pos, example, note, prepositions, updated_at: now })
               .eq("id", it.id);
 
             if(error) return alert("儲存失敗：" + error.message);
@@ -608,7 +676,8 @@
             count: 1,
             created_at: now,
             last_seen: now,
-            updated_at: now
+            updated_at: now,
+            note: ""
           });
 
         if(error) return alert("新增失敗：" + error.message);
@@ -624,6 +693,7 @@
         詞性: it.pos || "",
         介係詞: Array.isArray(it.prepositions) ? it.prepositions.join(", ") : "",
         例句: it.example || "",
+        備註: it.note || "",
         查詢次數: it.count || 0,
         熟悉度: it.familiarity || 1
       }));
@@ -653,6 +723,22 @@
       exportToExcel();
     });
 
+    els.reviewBtn.addEventListener("click", () => {
+      reviewIds = buildReviewList();
+      reviewMode = true;
+      els.reviewHint.textContent = reviewIds.length
+        ? `今日複習已啟用：目前顯示 ${reviewIds.length} 個建議複習單字。`
+        : "目前沒有可複習的單字。";
+      render();
+    });
+
+    els.showAllBtn.addEventListener("click", () => {
+      reviewMode = false;
+      reviewIds = [];
+      els.reviewHint.textContent = "已切換回全部單字。";
+      render();
+    });
+
     els.wordInput.addEventListener("keydown", (e) => {
       if(e.key === "Enter") els.addBtn.click();
     });
@@ -674,6 +760,8 @@
     els.logoutBtn.addEventListener("click", async () => {
       await supabaseClient.auth.signOut();
       itemsCache = [];
+      reviewMode = false;
+      reviewIds = [];
       render();
       await refreshAuth();
     });
