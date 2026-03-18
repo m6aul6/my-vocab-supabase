@@ -848,14 +848,28 @@
     });
 
     els.logoutBtn.addEventListener("click", async () => {
-      await supabaseClient.auth.signOut();
-      itemsCache = [];
-      reviewMode = false;
-      reviewIds = [];
-      typeFilter = "全部";
-      render();
-      await refreshAuth();
-    });
+  const { error } = await supabaseClient.auth.signOut();
+
+  if (error) {
+    alert("登出失敗：" + error.message);
+    return;
+  }
+
+  user = null;
+  itemsCache = [];
+  reviewMode = false;
+  reviewIds = [];
+  typeFilter = "全部";
+
+  els.userInfo.textContent = "尚未登入";
+  els.main.style.display = "none";
+  els.logoutBtn.style.display = "none";
+  els.loginBtn.style.display = "";
+
+  els.list.innerHTML = "";
+  els.stats.textContent = "";
+  els.reviewHint.textContent = "尚未啟用今日複習。";
+});
 
     (async () => {
       await supabaseClient.auth.getSession();
