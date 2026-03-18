@@ -16,6 +16,10 @@
       --accent: #111111;
       --danger: #d92d20;
       --radius: 20px;
+      --tag-word-bg: #eef4ff;
+      --tag-word-text: #3559b7;
+      --tag-phrase-bg: #fff4e8;
+      --tag-phrase-text: #b2641a;
     }
 
     * { box-sizing: border-box; }
@@ -80,6 +84,14 @@
       gap: 10px;
       flex: 1;
       flex-wrap: wrap;
+    }
+
+    .toolbar-left input {
+      flex: 1 1 220px;
+    }
+
+    .toolbar-left select {
+      flex: 0 0 110px;
     }
 
     input, button, textarea, select {
@@ -154,6 +166,7 @@
       margin-top: 12px;
     }
 
+    .typeFilters,
     .reviewBar {
       display: flex;
       gap: 10px;
@@ -216,6 +229,24 @@
       color: var(--sub);
       font-size: 12px;
       font-weight: 600;
+    }
+
+    .entryTag {
+      display: inline-block;
+      padding: 5px 10px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .entryTag.wordTag {
+      background: var(--tag-word-bg);
+      color: var(--tag-word-text);
+    }
+
+    .entryTag.phraseTag {
+      background: var(--tag-phrase-bg);
+      color: var(--tag-phrase-text);
     }
 
     .meta {
@@ -315,7 +346,7 @@
   <div class="wrap">
     <div class="hero">
       <h1>我的單字本</h1>
-      <p>簡潔、同步、可匯出，還能每天小量複習。</p>
+      <p>把單字和片語分開記，會更清楚也更好複習。</p>
     </div>
 
     <div class="card">
@@ -329,7 +360,11 @@
     <div class="card" id="main" style="display:none;">
       <div class="toolbar">
         <div class="toolbar-left">
-          <input id="wordInput" placeholder="輸入英文單字，例如 accountable" autocomplete="off" />
+          <input id="wordInput" placeholder="輸入單字或片語，例如 accountable / look forward to" autocomplete="off" />
+          <select id="entryTypeInput">
+            <option value="單字">單字</option>
+            <option value="片語">片語</option>
+          </select>
           <button id="addBtn">加入</button>
         </div>
         <button id="exportBtn" class="secondary">匯出 Excel</button>
@@ -340,6 +375,12 @@
         <button id="showAllBtn" class="secondary">顯示全部</button>
       </div>
       <div class="reviewHint" id="reviewHint">尚未啟用今日複習。</div>
+
+      <div class="typeFilters">
+        <button id="filterAllBtn" class="secondary">全部</button>
+        <button id="filterWordBtn" class="secondary">只看單字</button>
+        <button id="filterPhraseBtn" class="secondary">只看片語</button>
+      </div>
 
       <div class="filters">
         <input id="searchInput" placeholder="搜尋單字、中文、例句、備註…" />
@@ -371,11 +412,15 @@
       userInfo: document.getElementById("userInfo"),
       main: document.getElementById("main"),
       wordInput: document.getElementById("wordInput"),
+      entryTypeInput: document.getElementById("entryTypeInput"),
       addBtn: document.getElementById("addBtn"),
       exportBtn: document.getElementById("exportBtn"),
       reviewBtn: document.getElementById("reviewBtn"),
       showAllBtn: document.getElementById("showAllBtn"),
       reviewHint: document.getElementById("reviewHint"),
+      filterAllBtn: document.getElementById("filterAllBtn"),
+      filterWordBtn: document.getElementById("filterWordBtn"),
+      filterPhraseBtn: document.getElementById("filterPhraseBtn"),
       searchInput: document.getElementById("searchInput"),
       sortSelect: document.getElementById("sortSelect"),
       list: document.getElementById("list"),
@@ -386,6 +431,7 @@
     let itemsCache = [];
     let reviewMode = false;
     let reviewIds = [];
+    let typeFilter = "全部";
 
     function normWord(w){ return (w || "").trim().toLowerCase(); }
     function uniq(arr){ return [...new Set((arr||[]).filter(Boolean))]; }
@@ -409,6 +455,12 @@
       return html;
     }
 
+    function renderEntryTag(type){
+      const safeType = type || "單字";
+      const cls = safeType === "片語" ? "phraseTag" : "wordTag";
+      return `<span class="entryTag ${cls}">${escapeHTML(safeType)}</span>`;
+    }
+
     function getFilteredSorted(){
       const q = (els.searchInput.value || "").trim().toLowerCase();
       let arr = itemsCache;
@@ -417,13 +469,18 @@
         arr = arr.filter(it => reviewIds.includes(it.id));
       }
 
+      if (typeFilter !== "全部") {
+        arr = arr.filter(it => (it.entry_type || "單字") === typeFilter);
+      }
+
       if(q){
         arr = arr.filter(it =>
           (it.word || "").includes(q) ||
           (it.zh || "").toLowerCase().includes(q) ||
           (it.pos || "").toLowerCase().includes(q) ||
           (it.example || "").toLowerCase().includes(q) ||
-          (it.note || "").toLowerCase().includes(q)
+          (it.note || "").toLowerCase().includes(q) ||
+          (it.entry_type || "").toLowerCase().includes(q)
         );
       }
 
@@ -439,7 +496,12 @@
     }
 
     function buildReviewList() {
-      const ranked = [...itemsCache].sort((a, b) => {
+      const base = itemsCache.filter(it => {
+        if (typeFilter === "全部") return true;
+        return (it.entry_type || "單字") === typeFilter;
+      });
+
+      const ranked = [...base].sort((a, b) => {
         const fa = a.familiarity || 1;
         const fb = b.familiarity || 1;
         if (fa !== fb) return fa - fb;
@@ -494,13 +556,13 @@
     function render(){
       const total = itemsCache.length;
       const totalLookups = itemsCache.reduce((s,it)=> s + (it.count||0), 0);
-      els.stats.textContent = `共 ${total} 個單字｜累計查詢 ${totalLookups} 次`;
+      els.stats.textContent = `共 ${total} 筆｜累計查詢 ${totalLookups} 次｜目前分類：${typeFilter}`;
 
       const arr = getFilteredSorted();
       els.list.innerHTML = "";
 
       if(arr.length === 0){
-        els.list.innerHTML = `<div class="empty">目前沒有符合條件的單字。</div>`;
+        els.list.innerHTML = `<div class="empty">目前沒有符合條件的資料。</div>`;
         return;
       }
 
@@ -510,11 +572,13 @@
 
         const preps = (it.prepositions || []).map(p => `<span class="pill">${escapeHTML(p)}</span>`).join("");
         const isInReview = reviewMode && reviewIds.includes(it.id);
+        const entryType = it.entry_type || "單字";
 
         div.innerHTML = `
           <div class="itemTop">
             <div class="wordWrap">
               <span class="word">${escapeHTML(it.word)}</span>
+              ${renderEntryTag(entryType)}
               ${it.pos ? `<span class="pill">${escapeHTML(it.pos)}</span>` : ""}
               ${isInReview ? `<span class="reviewTag">今日複習</span>` : ""}
             </div>
@@ -558,8 +622,15 @@
                 <textarea data-in="zh">${escapeHTML(it.zh||"")}</textarea>
               </div>
               <div>
-                <div class="muted" style="margin-bottom:6px;">詞性</div>
+                <div class="muted" style="margin-bottom:6px;">類型</div>
+                <select data-in="entry_type">
+                  <option value="單字" ${entryType === "單字" ? "selected" : ""}>單字</option>
+                  <option value="片語" ${entryType === "片語" ? "selected" : ""}>片語</option>
+                </select>
+
+                <div class="muted" style="margin:10px 0 6px;">詞性</div>
                 <input data-in="pos" value="${escapeHTML(it.pos||"")}" />
+
                 <div class="muted" style="margin:10px 0 6px;">介係詞（逗號分隔）</div>
                 <input data-in="preps" value="${escapeHTML((it.prepositions||[]).join(", "))}" />
               </div>
@@ -612,13 +683,14 @@
             const pos = div.querySelector('[data-in="pos"]').value.trim();
             const example = div.querySelector('[data-in="example"]').value.trim();
             const note = div.querySelector('[data-in="note"]').value.trim();
+            const entry_type = div.querySelector('[data-in="entry_type"]').value;
             const prepsStr = div.querySelector('[data-in="preps"]').value.trim();
             const prepositions = uniq(prepsStr.split(",").map(s=>s.trim()).filter(Boolean));
             const now = new Date().toISOString();
 
             const { error } = await supabaseClient
               .from("vocab")
-              .update({ zh, pos, example, note, prepositions, updated_at: now })
+              .update({ zh, pos, example, note, entry_type, prepositions, updated_at: now })
               .eq("id", it.id);
 
             if(error) return alert("儲存失敗：" + error.message);
@@ -647,6 +719,7 @@
       const w = normWord(raw);
       if(!w || !user) return;
 
+      const entry_type = els.entryTypeInput.value || "單字";
       const now = new Date().toISOString();
 
       const { data: existing, error: qerr } = await supabaseClient
@@ -672,6 +745,7 @@
           .insert({
             user_id: user.id,
             word: w,
+            entry_type,
             familiarity: 1,
             count: 1,
             created_at: now,
@@ -688,7 +762,8 @@
 
     function exportToExcel(){
       const rows = getFilteredSorted().map(it => ({
-        單字: it.word || "",
+        類型: it.entry_type || "單字",
+        單字或片語: it.word || "",
         中文解釋: it.zh || "",
         詞性: it.pos || "",
         介係詞: Array.isArray(it.prepositions) ? it.prepositions.join(", ") : "",
@@ -727,15 +802,30 @@
       reviewIds = buildReviewList();
       reviewMode = true;
       els.reviewHint.textContent = reviewIds.length
-        ? `今日複習已啟用：目前顯示 ${reviewIds.length} 個建議複習單字。`
-        : "目前沒有可複習的單字。";
+        ? `今日複習已啟用：目前顯示 ${reviewIds.length} 筆建議複習資料。`
+        : "目前沒有可複習的資料。";
       render();
     });
 
     els.showAllBtn.addEventListener("click", () => {
       reviewMode = false;
       reviewIds = [];
-      els.reviewHint.textContent = "已切換回全部單字。";
+      els.reviewHint.textContent = "已切換回全部資料。";
+      render();
+    });
+
+    els.filterAllBtn.addEventListener("click", () => {
+      typeFilter = "全部";
+      render();
+    });
+
+    els.filterWordBtn.addEventListener("click", () => {
+      typeFilter = "單字";
+      render();
+    });
+
+    els.filterPhraseBtn.addEventListener("click", () => {
+      typeFilter = "片語";
       render();
     });
 
@@ -762,6 +852,7 @@
       itemsCache = [];
       reviewMode = false;
       reviewIds = [];
+      typeFilter = "全部";
       render();
       await refreshAuth();
     });
