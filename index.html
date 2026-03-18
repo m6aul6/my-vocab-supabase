@@ -14,7 +14,7 @@
     input, button, textarea, select {
       border-radius: 12px; border: 1px solid #d9dce6; padding: 10px 12px; font-size: 14px; background:#fff;
     }
-    input, textarea { flex: 1; min-width: 240px; }
+    input, textarea, select { flex: 1; min-width: 180px; }
     textarea { min-height: 84px; resize: vertical; }
     button { cursor: pointer; border: 0; background:#111; color:#fff; }
     button.secondary { background:#eef0f6; color:#111; border: 1px solid #d9dce6; }
@@ -46,7 +46,7 @@
       </div>
 
       <div class="notice">
-        你可以先用「加入 / +1 次」累積單字，再用「編輯 → 自動帶入（草稿）」讓 Gemini 幫你起草中文/詞性/例句/介係詞，仍保留你自己的修改空間。
+        這是穩定版：保留 Google 登入、雲端同步、編輯與 Excel 匯出。
       </div>
     </div>
 
@@ -54,6 +54,7 @@
       <div class="row">
         <input id="wordInput" placeholder="輸入英文單字，例如: accountable" autocomplete="off" />
         <button id="addBtn">加入 / +1 次</button>
+        <button id="exportBtn" class="secondary">匯出 Excel</button>
       </div>
 
       <div class="row" style="margin-top:10px;">
@@ -72,6 +73,8 @@
   </div>
 
   <script src="https://unpkg.com/@supabase/supabase-js@2.97.0/dist/umd/supabase.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js"></script>
+
   <script>
     const SUPABASE_URL = "https://omegmriwanrgudhqyoha.supabase.co";
     const SUPABASE_ANON_KEY = "sb_publishable_OGKVj80-zcwumHWkIfg2bw_gn9bvt3a";
@@ -85,6 +88,7 @@
       main: document.getElementById("main"),
       wordInput: document.getElementById("wordInput"),
       addBtn: document.getElementById("addBtn"),
+      exportBtn: document.getElementById("exportBtn"),
       searchInput: document.getElementById("searchInput"),
       sortSelect: document.getElementById("sortSelect"),
       list: document.getElementById("list"),
@@ -114,20 +118,6 @@
       }
       return html;
     }
-
-    async function fetchGeminiDraft(word){
-  const r = await fetch(
-    `https://omegmriwanrgudhqyoha.supabase.co/functions/v1/chatgpt-open?word=${encodeURIComponent(word)}`
-  );
-
-  const j = await r.json();
-
-  if(!r.ok){
-    throw new Error(j?.error || "AI lookup failed");
-  }
-
-  return j;
-}
 
     async function refreshAuth(){
       const { data } = await supabaseClient.auth.getUser();
@@ -215,7 +205,6 @@
               <span class="word">${escapeHTML(it.word)}</span>
               ${it.pos ? `<span class="pill">${escapeHTML(it.pos)}</span>` : ""}
             </div>
-
             <div class="meta">
               次數：<b>${it.count || 0}</b>
             </div>
@@ -254,7 +243,6 @@
             <textarea data-in="example">${escapeHTML(it.example||"")}</textarea>
 
             <div class="actions">
-              <button class="secondary" data-act="draft">自動帶入（草稿）</button>
               <button data-act="save">儲存</button>
               <button class="secondary" data-act="cancel">取消</button>
             </div>
@@ -287,35 +275,6 @@
 
           if(act === "cancel"){
             div.querySelector('[data-edit]').style.display = "none";
-            return;
-          }
-
-          if(act === "draft"){
-            try{
-              btn.textContent = "生成中…";
-              btn.disabled = true;
-
-              const draft = await fetchGeminiDraft(it.word);
-
-              const zhEl = div.querySelector('[data-in="zh"]');
-              const posEl = div.querySelector('[data-in="pos"]');
-              const exEl  = div.querySelector('[data-in="example"]');
-              const prepsEl = div.querySelector('[data-in="preps"]');
-
-              if(zhEl && !zhEl.value.trim() && draft.zh) zhEl.value = draft.zh;
-              if(posEl && !posEl.value.trim() && draft.pos) posEl.value = draft.pos;
-              if(exEl && !exEl.value.trim() && draft.example) exEl.value = draft.example;
-
-              if(prepsEl && !prepsEl.value.trim() && Array.isArray(draft.prepositions)){
-                prepsEl.value = draft.prepositions.join(", ");
-              }
-            }catch(err){
-              console.error("Draft error:", err);
-              alert("草稿取得失敗：" + (err?.message || err));
-            }finally{
-              btn.textContent = "自動帶入（草稿）";
-              btn.disabled = false;
-            }
             return;
           }
 
@@ -400,16 +359,49 @@
             last_seen: now,
             updated_at: now
           });
+
         if(error) return alert("新增失敗：" + error.message);
       }
 
       await loadList();
     }
 
+    function exportToExcel(){
+      const rows = getFilteredSorted().map(it => ({
+        單字: it.word || "",
+        中文解釋: it.zh || "",
+        詞性: it.pos || "",
+        介係詞: Array.isArray(it.prepositions) ? it.prepositions.join(", ") : "",
+        例句: it.example || "",
+        查詢次數: it.count || 0,
+        熟悉度: it.familiarity || 1,
+        建立時間: it.created_at || "",
+        最近查詢時間: it.last_seen || ""
+      }));
+
+      if(!rows.length){
+        alert("目前沒有資料可以匯出");
+        return;
+      }
+
+      const worksheet = XLSX.utils.json_to_sheet(rows);
+      const workbook = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(workbook, worksheet, "單字本");
+
+      const now = new Date();
+      const filename = `我的AI單字本_${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,"0")}-${String(now.getDate()).padStart(2,"0")}.xlsx`;
+
+      XLSX.writeFile(workbook, filename);
+    }
+
     els.addBtn.addEventListener("click", async () => {
       await upsertWord(els.wordInput.value);
       els.wordInput.value = "";
       els.wordInput.focus();
+    });
+
+    els.exportBtn.addEventListener("click", () => {
+      exportToExcel();
     });
 
     els.wordInput.addEventListener("keydown", (e) => {
