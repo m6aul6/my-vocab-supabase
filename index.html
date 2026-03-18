@@ -3,13 +3,15 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <link rel="manifest" href="manifest.json">
-<meta name="theme-color" content="#111111">
-<meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="default">
-<meta name="apple-mobile-web-app-title" content="單字本">
-<link rel="apple-touch-icon" href="icon-192.png">
   <title>我的單字本</title>
+
+  <link rel="manifest" href="manifest.json">
+  <meta name="theme-color" content="#111111">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="單字本">
+  <link rel="apple-touch-icon" href="icon-192.png">
+
   <style>
     :root {
       font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", "Noto Sans TC", sans-serif;
@@ -97,7 +99,7 @@
     }
 
     .toolbar-left select {
-      flex: 0 0 110px;
+      flex: 0 0 130px;
     }
 
     input, button, textarea, select {
@@ -122,6 +124,13 @@
     textarea {
       min-height: 88px;
       resize: vertical;
+    }
+
+    select:disabled,
+    textarea:disabled,
+    input:disabled {
+      background: #f3f4f6;
+      color: #9ca3af;
     }
 
     button {
@@ -352,7 +361,7 @@
   <div class="wrap">
     <div class="hero">
       <h1>我的單字本</h1>
-      <p>把單字和片語分開記，會更清楚也更好複習。</p>
+      <p>一天一單字，會其來有自。</p>
     </div>
 
     <div class="card">
@@ -412,6 +421,18 @@
 
     const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
+    const POS_OPTIONS = [
+      "",
+      "noun",
+      "verb",
+      "adjective",
+      "adverb",
+      "pronoun",
+      "preposition",
+      "conjunction",
+      "interjection"
+    ];
+
     const els = {
       loginBtn: document.getElementById("loginBtn"),
       logoutBtn: document.getElementById("logoutBtn"),
@@ -465,6 +486,18 @@
       const safeType = type || "單字";
       const cls = safeType === "片語" ? "phraseTag" : "wordTag";
       return `<span class="entryTag ${cls}">${escapeHTML(safeType)}</span>`;
+    }
+
+    function renderPosSelect(selectedValue = "", isPhrase = false){
+      return `
+        <select data-in="pos" ${isPhrase ? "disabled" : ""}>
+          ${POS_OPTIONS.map(pos => {
+            const label = pos === "" ? "可留空" : pos;
+            const selected = (selectedValue || "") === pos ? "selected" : "";
+            return `<option value="${escapeHTML(pos)}" ${selected}>${escapeHTML(label)}</option>`;
+          }).join("")}
+        </select>
+      `;
     }
 
     function getFilteredSorted(){
@@ -579,6 +612,7 @@
         const preps = (it.prepositions || []).map(p => `<span class="pill">${escapeHTML(p)}</span>`).join("");
         const isInReview = reviewMode && reviewIds.includes(it.id);
         const entryType = it.entry_type || "單字";
+        const isPhrase = entryType === "片語";
 
         div.innerHTML = `
           <div class="itemTop">
@@ -635,7 +669,9 @@
                 </select>
 
                 <div class="muted" style="margin:10px 0 6px;">詞性</div>
-                <input data-in="pos" value="${escapeHTML(it.pos||"")}" />
+                <div data-pos-wrap>
+                  ${renderPosSelect(it.pos || "", isPhrase)}
+                </div>
 
                 <div class="muted" style="margin:10px 0 6px;">介係詞（逗號分隔）</div>
                 <input data-in="preps" value="${escapeHTML((it.prepositions||[]).join(", "))}" />
@@ -654,6 +690,19 @@
             </div>
           </div>
         `;
+
+        const entryTypeSelect = div.querySelector('[data-in="entry_type"]');
+        if (entryTypeSelect) {
+          entryTypeSelect.addEventListener("change", () => {
+            const wrap = div.querySelector('[data-pos-wrap]');
+            if (!wrap) return;
+            const currentType = entryTypeSelect.value;
+            const currentPos = currentType === "片語"
+              ? ""
+              : (div.querySelector('[data-in="pos"]')?.value || "");
+            wrap.innerHTML = renderPosSelect(currentPos, currentType === "片語");
+          });
+        }
 
         div.addEventListener("click", async (e) => {
           const btn = e.target.closest("button");
@@ -686,13 +735,17 @@
 
           if(act === "save"){
             const zh = div.querySelector('[data-in="zh"]').value.trim();
-            const pos = div.querySelector('[data-in="pos"]').value.trim();
+            const entry_type = div.querySelector('[data-in="entry_type"]').value;
+            let pos = div.querySelector('[data-in="pos"]')?.value?.trim() || "";
             const example = div.querySelector('[data-in="example"]').value.trim();
             const note = div.querySelector('[data-in="note"]').value.trim();
-            const entry_type = div.querySelector('[data-in="entry_type"]').value;
             const prepsStr = div.querySelector('[data-in="preps"]').value.trim();
             const prepositions = uniq(prepsStr.split(",").map(s=>s.trim()).filter(Boolean));
             const now = new Date().toISOString();
+
+            if (entry_type === "片語") {
+              pos = "";
+            }
 
             const { error } = await supabaseClient
               .from("vocab")
@@ -752,6 +805,7 @@
             user_id: user.id,
             word: w,
             entry_type,
+            pos: "",
             familiarity: 1,
             count: 1,
             created_at: now,
@@ -844,40 +898,38 @@
 
     els.loginBtn.addEventListener("click", async () => {
       const redirectTo = window.location.href.split("#")[0];
-
       const { error } = await supabaseClient.auth.signInWithOAuth({
         provider: "google",
         options: { redirectTo }
       });
-
       if (error) alert("登入失敗：" + error.message);
     });
 
     els.logoutBtn.addEventListener("click", async () => {
-  const { error } = await supabaseClient.auth.signOut();
+      const { error } = await supabaseClient.auth.signOut({ scope: "local" });
 
-  if (error) {
-    alert("登出失敗：" + error.message);
-    return;
-  }
+      if (error) {
+        alert("登出失敗：" + error.message);
+        return;
+      }
 
-  user = null;
-  itemsCache = [];
-  reviewMode = false;
-  reviewIds = [];
-  typeFilter = "全部";
+      user = null;
+      itemsCache = [];
+      reviewMode = false;
+      reviewIds = [];
+      typeFilter = "全部";
 
-  els.userInfo.textContent = "尚未登入";
-  els.main.style.display = "none";
-  els.logoutBtn.style.display = "none";
-  els.loginBtn.style.display = "";
+      els.userInfo.textContent = "尚未登入";
+      els.main.style.display = "none";
+      els.logoutBtn.style.display = "none";
+      els.loginBtn.style.display = "";
 
-  els.list.innerHTML = "";
-  els.stats.textContent = "";
-  els.reviewHint.textContent = "尚未啟用今日複習。";
+      els.list.innerHTML = "";
+      els.stats.textContent = "";
+      els.reviewHint.textContent = "尚未啟用今日複習。";
 
-  window.location.reload();
-});
+      window.location.reload();
+    });
 
     (async () => {
       await supabaseClient.auth.getSession();
